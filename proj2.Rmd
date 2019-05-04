@@ -1,0 +1,236 @@
+---
+title: "Project 2"
+author: ""
+date: ""
+output: 
+  pdf_document:
+    fig_height: 3
+    fig_width: 5
+  html_document:
+    fig_height: 3
+    fig_width: 5
+  word_document:
+    fig_height: 3
+    fig_width: 5
+---
+
+```{r, setup, include=FALSE}
+require(mosaic)   # Load additional packages here 
+library(GGally)
+library(dplyr)
+library(mclust)
+library(class)
+library(MASS)
+library(ROCR)
+library(glmnet)
+knitr::opts_chunk$set(
+  tidy=FALSE,     # display code as typed
+  size="small")   # slightly smaller font for code
+```
+
+### 2. Preparation
+
+```{r, include=FALSE}
+image1 <- read.table('image1.txt')
+colnames(image1) <- c('y', 'x', 'label',
+                     'NDAI', 'SD', 'CORR',
+                     'DF', 'CF', 'BF',
+                     'AF', 'AN')
+image2 <- read.table('image2.txt')
+colnames(image2) <- c('y', 'x', 'label',
+                     'NDAI', 'SD', 'CORR',
+                     'DF', 'CF', 'BF',
+                     'AF', 'AN')
+image3 <- read.table('image3.txt')
+colnames(image3) <- c('y', 'x', 'label',
+                     'NDAI', 'SD', 'CORR',
+                     'DF', 'CF', 'BF',
+                     'AF', 'AN')
+complete <- rbind(image1,image2,image3) 
+colnames(complete) <- colnames(image1)
+complete <- complete %>% filter(label!=0)
+```
+
+```{r}
+ggplot(complete,aes(x,y,col = factor(label)))+geom_point()
+```
+
+
+#### (a) Data Split
+
+```{r}
+block1 <- complete %>% filter(x<147)
+block2 <- complete %>% filter(x>=147 & x<221)
+block3 <- complete %>% filter(x>=221 & x<309)
+block4 <- complete %>% filter(x>=309)
+```
+
+```{r}
+set.seed(42)
+train1_idx <- sample(1:nrow(block1), replace=FALSE, ceiling(nrow(block1)*7/10))
+train2_idx <- sample(1:nrow(block2), replace=FALSE, ceiling(nrow(block2)*7/10))
+train3_idx <- sample(1:nrow(block3), replace=FALSE, ceiling(nrow(block3)*7/10))
+train4_idx <- sample(1:nrow(block4), replace=FALSE, ceiling(nrow(block4)*7/10))
+
+val1_idx <- sample(1:length(train1_idx), replace=FALSE, ceiling(length(train1_idx)*2/7))
+val2_idx <- sample(1:length(train2_idx), replace=FALSE, ceiling(length(train2_idx)*2/7))
+val3_idx <- sample(1:length(train3_idx), replace=FALSE, ceiling(length(train3_idx)*2/7))
+val4_idx <- sample(1:length(train4_idx), replace=FALSE, ceiling(length(train4_idxidx)*2/7))
+```
+
+```{r}
+train <- rbind(block1[train1_idx,][-val1_idx,],
+               block2[train2_idx,][-val2_idx,],
+               block3[train3_idx,][-val3_idx,],
+               block4[train4_idx,][-val4_idx,])
+
+val <- rbind(block1[train1_idx,][val1_idx,],
+             block2[train2_idx,][val2_idx,],
+             block3[train3_idx,][val3_idx,],
+             block4[train4_idx,][val4_idx,])
+
+test <- rbind(block1[-train1_idx,],
+              block2[-train2_idx,],
+              block3[-train3_idx,],
+              block4[-train4_idx,])
+```
+
+Since the data is not i.i.d., we need to account for dependencies between data units. In this case, there is spatial dependence. One non-trivial way to split the data is stratified random sampling. We split the data into 4 blocks based on the median x- and y-coordinates. Then we sampled randomly from each block to create the training, validation, and test sets.
+
+Coriolis effect.
+
+#### (b) Baseline
+
+```{r}
+val_trivial_accuracy <- sum(rep(-1,nrow(val)) == val$label) / nrow(val)
+test_trivial_accuracy <- sum(rep(-1,nrow(test)) == test$label) / nrow(test)
+```
+
+A trivial classifier will have high average accuracy when there is class imbalance.
+
+#### (c) First order importance
+
+```{r}
+ggcorr(complete,label=TRUE)
+```
+
+```{r}
+complete %>%
+  ggplot() +
+  geom_histogram(aes(x=NDAI, fill=factor(label)), binwidth=0.125)
+```
+
+```{r}
+complete %>%
+  ggplot() +
+  geom_histogram(aes(x=CORR, fill=factor(label)), binwidth=0.05)
+```
+
+```{r}
+complete %>%
+  ggplot() +
+  geom_histogram(aes(x=AF, fill=factor(label)), binwidth=5)
+```
+
+```{r}
+complete %>%
+  ggplot() +
+  geom_histogram(aes(x=AN, fill=factor(label)), binwidth=5)
+```
+
+We chose NDAI, AF, and AN as our three best features. To choose them, we looked at the correlations between the expert labels and provided features. Beyond the correlations, we also observed the distributions of the highly correlated features conditioned on the expert labels to see whether they were discernible.
+
+#### (d) CVgeneric
+
+```{r}
+CVgeneric <- function(features,labels,K,classifer,loss){
+  folds<-cut(seq(1,length(features)),breaks = K,labels = FALSE)
+  err<-0*c(1:K)
+  
+  for(i in 1:K){
+    valIndexes<- which(folds == i, arr.ind = TRUE)
+    valData<-features[valIndexes]
+    trainData<-features[-valIndexes]
+    y_val<-labels[valIndexes]
+    y_train<-labels[-valIndexes]
+    matrix_train<-cbind(y_train,trainData)
+    matrix_val<-cbind(y_val,valData)
+    formula<-paste("y_train~",paste(names(matrix_train[,-1]),collapse="+"))
+    mod<- classifier(formula,data=matrix_train)
+    err[i]<-loss(y_val,predict(mod,valData))
+  }
+  return(mean(err))
+}
+```
+
+```{r}
+loss <- function(y, yhat) {
+  return(sum(y!=yhat)/length(y))
+}
+```
+
+
+### 3. Modeling
+
+#### (a) 
+
+##### (i) LDA
+
+Assumptions: Data is normally distributed. Homoskedasticity is also assumed a.k.a. $\Sigma_X=\Sigma_Y$
+
+```{r}
+LDA <- lda(label ~ NDAI + AN + AF, train)
+LDA_predictions <- predict(LDA,test)$class
+LDA_error <- sum(test$label!=LDA_predictions)/nrow(test)
+LDA_error
+```
+
+```{r}
+plot(performance(prediction(as.numeric(LDA_predictions),test$label), measure='tpr', x.measure='fpr'))
+```
+
+```{r}
+QDA <- qda(label ~ NDAI + AN + AF, train)
+QDA_predictions <- predict(QDA,test)$class
+QDA_error <- sum(test$label!=QDA_predictions)/nrow(test)
+QDA_error
+```
+
+```{r}
+plot(performance(prediction(as.numeric(QDA_predictions),test$label), measure='tpr', x.measure='fpr'))
+```
+
+##### (ii) Logistic
+
+Assumptions:
+
+```{r}
+
+```
+
+
+```{r}
+train_logistic <- train %>% mutate(label = ifelse(label==-1,0,1))
+logistic <- glm(label ~ NDAI + AF + AN, family=binomial(link='logit'), data=train_logistic)
+logistic_response <- predict(logistic, test, type='response')
+logistic_predictions <- ifelse(logistic_response>0.5,1,0)
+logistic_error <- sum(logistic_predictions != ifelse(test$label==-1,0,1))/nrow(test)
+logistic_error
+```
+
+##### (iii) Random Forest
+
+Assumptions:
+
+##### (iv) 8-NN
+
+Assumptions:
+
+```{r}
+kNN <- knn(train[,c('NDAI','AF','AN')],test[,c('NDAI','AF','AN')], cl=factor(train$label),k=8)
+kNN_error <- sum(kNN != test$label) / nrow(test)
+```
+
+```{r}
+plot(performance(prediction(as.numeric(kNN),test$label), measure='tpr', x.measure='fpr'))
+```
