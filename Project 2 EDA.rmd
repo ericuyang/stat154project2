@@ -1,0 +1,131 @@
+---
+title: "Untitled"
+author: ""
+date: ""
+output: 
+  html_document:
+    fig_height: 3
+    fig_width: 5
+---
+<!-- Don't edit in between this line and the one below -->
+```{r include=FALSE}
+# Don't delete this chunk if you are using the DataComputing package
+library(DataComputing)
+library(ggplot2)
+library(GGally)
+```
+*Source file* 
+```{r, results='asis', echo=FALSE}
+includeSourceDocuments()
+```
+<!-- Don't edit the material above this line -->
+PART 1
+```{r}
+image1<-read.csv("image_data/image1.txt",sep = "",header=FALSE)
+image2<-read.csv("image_data/image2.txt",sep = "",header=FALSE)
+image3<-read.csv("image_data/image3.txt",sep = "",header=FALSE)
+names(image1)<-c("y","x","label","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+names(image2)<-c("y","x","label","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+names(image3)<-c("y","x","label","NDAI","SD","CORR","DF","CF","BF","AF","AN")
+```
+
+```{r}
+image1_pixel_percentage<- c(length(image1$label[image1$label==1])*100/nrow(image1),length(image1$label[image1$label==0])*100/nrow(image1),length(image1$label[image1$label==-1])*100/nrow(image1))
+image1_pixel_percentage
+image2_pixel_percentage<- c(length(image2$label[image2$label==1])*100/nrow(image2),length(image2$label[image2$label==0])*100/nrow(image2),length(image2$label[image2$label==-1])*100/nrow(image2))
+image2_pixel_percentage
+image3_pixel_percentage<- c(length(image3$label[image3$label==1])*100/nrow(image3),length(image3$label[image3$label==0])*100/nrow(image3),length(image3$label[image3$label==-1])*100/nrow(image3))
+image3_pixel_percentage
+image_percentage <-data.frame(image1_pixel_percentage,image2_pixel_percentage,image3_pixel_percentage)
+rownames(image_percentage)<- c("% of 1","% of 0","% of -1")
+names(image_percentage)<-c("image 1","image 2","image 3")
+image_percentage
+```
+
+```{r}
+hist(image1$SD)
+hist(image1$CORR)
+hist(image1$NDAI)
+hist(image2$SD)
+hist(image2$CORR)
+hist(image2$NDAI)
+hist(image3$SD)
+hist(image3$CORR)
+hist(image3$NDAI) #Histogram of SD, CORR, NDAI look really similar and seems to have a decent spread
+#SD, is skewed to the right which might mean certain outliers or indicate some bad predictions
+```
+
+```{r}
+summary(image1)
+summary(image2)
+summary(image3)
+```
+
+
+```{r}
+ggplot(image1,aes(x,y,col = factor(label)))+geom_point()
+```
+
+```{r}
+ggplot(image2,aes(x,y,col = factor(label)))+geom_point()
+```
+```{r}
+ggplot(image3,aes(x,y,col = factor(label)))+geom_point()
+```
+
+
+```{r}
+ggcorr(image1[,4:6],label = TRUE)
+ggcorr(image2[,4:6],label = TRUE)
+ggcorr(image3[,4:6],label = TRUE)
+```
+
+
+```{r}
+pairs(image1[,3:6])
+pairs(image2[,3:6])
+pairs(image3[,3:6])
+```
+
+
+```{r}
+ggcorr(image1[,3:6],label = TRUE)
+ggcorr(image2[,3:6],label = TRUE)
+ggcorr(image3[,3:6],label = TRUE) #There seems to be high correlation with NDAI values and Label
+
+```
+```{r}
+
+```
+
+
+2d)
+```{r}
+loss<-function(y,mod,x){
+  error<-mean((y-predict(mod,x))^2)
+  return(error)
+}
+CVgeneric <- function(features,labels,K,classifer,loss){
+  folds<-cut(seq(1,length(features)),breaks = K,labels = FALSE)
+  err<-0*c(1:K)
+  for(i in 1:K){
+    valIndexes<- which(folds == i, arr.ind = TRUE)
+    valData<-features[valIndexes]
+    trainData<-features[-valIndexes]
+    y_val<-labels[valIndexes]
+    y_train<-labels[-valIndexes]
+    matrix_train<-cbind(y_train,trainData)
+    matrix_val<-cbind(y_val,valData)
+    formula<-paste("y_train~",paste(names(matrix_train[,-1]),collapse="+"))
+    mod<- classifier(formula,data=matrix_train)
+    err[i]<-loss(y_val,predict(mod,valData))
+    
+  }
+  return(mean(err))
+}
+
+CVgeneric()
+```
+
+
+
